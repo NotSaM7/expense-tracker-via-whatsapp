@@ -13,7 +13,7 @@ export async function sendBudgetConfirmationPrompt(
   stateId: string
 ): Promise<void> {
   const currentBudget = await getOrCreateCurrentBudget();
-  const limit = currentBudget.limit || 15000;
+  const limit = currentBudget.limit || 10000;
 
   await setUserSetupStage(stateId, "awaiting_budget_choice", {
     current_limit: limit,
@@ -47,7 +47,7 @@ export async function handleBudgetFlow(
   const lower = clean.toLowerCase();
   const stage = state.setup_stage;
   const pending = state.pending_transaction || {};
-  const currentLimit = Number(pending.current_limit) || 15000;
+  const currentLimit = Number(pending.current_limit) || 10000;
 
   // ── 1. Explicit trigger command ────────────────────────────────────────────
   if (

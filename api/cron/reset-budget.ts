@@ -39,13 +39,13 @@ export default async function handler(
     const currentBudget = budgetRows?.[0] || {
       id: "default",
       spent: 0,
-      monthly_limit: 15000,
+      monthly_limit: 10000,
       current_month: currentMonthStr,
     };
 
     const outgoingMonth = currentBudget.current_month || currentMonthStr;
     const spentAmount = Number(currentBudget.spent) || 0;
-    const monthlyLimit = Number(currentBudget.monthly_limit) || 15000;
+    const monthlyLimit = Number(currentBudget.monthly_limit) || 10000;
 
     // Next month string (e.g. "2026-09")
     const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);

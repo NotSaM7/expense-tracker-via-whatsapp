@@ -42,7 +42,7 @@ create table if not exists budget_history (
   id            uuid        primary key default gen_random_uuid(),
   month         text        not null,
   spent         numeric     not null default 0,
-  monthly_limit numeric     not null default 15000,
+  monthly_limit numeric     not null default 10000,
   summary_data  jsonb       null,
   created_at    timestamptz not null default now()
 );

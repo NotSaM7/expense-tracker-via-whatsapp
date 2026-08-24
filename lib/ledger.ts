@@ -40,7 +40,7 @@ export async function getOrCreateCurrentBudget(): Promise<{
       return {
         id: row.id,
         spent: 0,
-        limit: Number(row.monthly_limit) || 15000,
+        limit: Number(row.monthly_limit) || 10000,
         current_month: currentMonthStr,
       };
     }
@@ -48,15 +48,15 @@ export async function getOrCreateCurrentBudget(): Promise<{
     return {
       id: row.id,
       spent: Number(row.spent) || 0,
-      limit: Number(row.monthly_limit) || 15000,
+      limit: Number(row.monthly_limit) || 10000,
       current_month: row.current_month,
     };
   }
 
-  // Initialize default monthly budget of ₹15,000 if table is empty
+  // Initialize default monthly budget of ₹10,000 if table is empty
   const { data: created, error: createError } = await (supabase.from("budget") as any)
     .insert({
-      monthly_limit: 15000,
+      monthly_limit: 10000,
       spent: 0,
       reset_day: 1,
       current_month: currentMonthStr,
@@ -69,7 +69,7 @@ export async function getOrCreateCurrentBudget(): Promise<{
     return {
       id: "fallback-budget",
       spent: 0,
-      limit: 15000,
+      limit: 10000,
       current_month: currentMonthStr,
     };
   }
@@ -77,7 +77,7 @@ export async function getOrCreateCurrentBudget(): Promise<{
   return {
     id: (created as any).id,
     spent: Number((created as any).spent) || 0,
-    limit: Number((created as any).monthly_limit) || 15000,
+    limit: Number((created as any).monthly_limit) || 10000,
     current_month: (created as any).current_month,
   };
 }

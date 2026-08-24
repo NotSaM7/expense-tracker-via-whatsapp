@@ -31,7 +31,7 @@ export default function App() {
   const [totalNetWorth, setTotalNetWorth] = useState<number>(0);
   const [budget, setBudget] = useState<Budget>({
     spent: 0,
-    monthly_limit: 15000,
+    monthly_limit: 10000,
     current_month: "2026-08",
   });
   const [transactions, setTransactions] = useState<Transaction[]>([]);
