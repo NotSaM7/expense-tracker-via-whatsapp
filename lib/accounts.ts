@@ -14,14 +14,23 @@ export async function getAllAccountsWithTotal(): Promise<{
   accounts: AccountSummary[];
   total: number;
 }> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("accounts")
     .select("id, name, balance, is_primary")
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error("[accounts] Error fetching accounts:", error.message);
-    return { accounts: [], total: 0 };
+    console.warn("[accounts] Retrying select without is_primary column:", error.message);
+    const fallback = await supabase
+      .from("accounts")
+      .select("id, name, balance")
+      .order("created_at", { ascending: true });
+
+    if (fallback.error) {
+      console.error("[accounts] Error fetching accounts:", fallback.error.message);
+      return { accounts: [], total: 0 };
+    }
+    data = fallback.data;
   }
 
   const accounts: AccountSummary[] = (data || []).map((acc: any, index: number) => ({
