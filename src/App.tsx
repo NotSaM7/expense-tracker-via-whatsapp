@@ -87,7 +87,12 @@ export default function App() {
 
       if (budRes.ok) {
         const budData = await budRes.json();
-        setBudget(budData);
+        setBudget({
+          id: budData.id,
+          spent: Number(budData.spent) || 0,
+          monthly_limit: Number(budData.monthly_limit || budData.limit) || 10000,
+          current_month: budData.current_month || "",
+        });
       }
 
       if (txRes.ok) {
@@ -307,8 +312,10 @@ export default function App() {
   const isBudgetExceeded = budgetRatio >= 100;
 
   // Currency Formatter
-  const formatINR = (val: number) => {
-    return "₹" + Math.round(val).toLocaleString("en-IN");
+  const formatINR = (val: number | undefined | null) => {
+    const num = Number(val);
+    if (isNaN(num)) return "₹0";
+    return "₹" + Math.round(num).toLocaleString("en-IN");
   };
 
   return (

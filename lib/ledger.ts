@@ -18,6 +18,7 @@ export interface ApplyTransactionResult {
 export async function getOrCreateCurrentBudget(): Promise<{
   id: string;
   spent: number;
+  monthly_limit: number;
   limit: number;
   current_month: string;
 }> {
@@ -31,6 +32,7 @@ export async function getOrCreateCurrentBudget(): Promise<{
 
   if (!error && budgetRows && budgetRows.length > 0) {
     const row = budgetRows[0] as any;
+    const limitVal = Number(row.monthly_limit) || 10000;
     // If month rolled over, reset spent for the new month
     if (row.current_month !== currentMonthStr) {
       await (supabase.from("budget") as any)
@@ -40,7 +42,8 @@ export async function getOrCreateCurrentBudget(): Promise<{
       return {
         id: row.id,
         spent: 0,
-        limit: Number(row.monthly_limit) || 10000,
+        monthly_limit: limitVal,
+        limit: limitVal,
         current_month: currentMonthStr,
       };
     }
@@ -48,7 +51,8 @@ export async function getOrCreateCurrentBudget(): Promise<{
     return {
       id: row.id,
       spent: Number(row.spent) || 0,
-      limit: Number(row.monthly_limit) || 10000,
+      monthly_limit: limitVal,
+      limit: limitVal,
       current_month: row.current_month,
     };
   }
@@ -69,15 +73,18 @@ export async function getOrCreateCurrentBudget(): Promise<{
     return {
       id: "fallback-budget",
       spent: 0,
+      monthly_limit: 10000,
       limit: 10000,
       current_month: currentMonthStr,
     };
   }
 
+  const limitVal = Number((created as any).monthly_limit) || 10000;
   return {
     id: (created as any).id,
     spent: Number((created as any).spent) || 0,
-    limit: Number((created as any).monthly_limit) || 10000,
+    monthly_limit: limitVal,
+    limit: limitVal,
     current_month: (created as any).current_month,
   };
 }
