@@ -120,7 +120,7 @@ export async function updateMonthlyBudgetLimit(newLimit: number): Promise<void> 
  * Executes the complete ledger operation for an incoming transaction:
  * 1. Inserts transaction into `transactions` table.
  * 2. Updates the account balance (+ for credit, - for debit).
- * 3. Updates the monthly budget spent amount (debits only).
+ * 3. Updates the monthly budget spent amount (+ for debit, - for credit).
  */
 export async function applyTransaction(
   accountId: string,
@@ -167,11 +167,14 @@ export async function applyTransaction(
 
   if (type === "debit") {
     updatedSpent = budget.spent + amount;
-    if (budget.id !== "fallback-budget") {
-      await (supabase.from("budget") as any)
-        .update({ spent: updatedSpent, updated_at: new Date().toISOString() })
-        .eq("id", budget.id);
-    }
+  } else if (type === "credit") {
+    updatedSpent = Math.max(0, budget.spent - amount);
+  }
+
+  if (budget.id !== "fallback-budget") {
+    await (supabase.from("budget") as any)
+      .update({ spent: updatedSpent, updated_at: new Date().toISOString() })
+      .eq("id", budget.id);
   }
 
   return {
@@ -187,7 +190,7 @@ export async function applyTransaction(
 /**
  * Reverses a transaction and safely deletes it:
  * - If debit: increases account balance, decreases monthly budget spent (if same month)
- * - If credit: decreases account balance
+ * - If credit: decreases account balance, increases monthly budget spent (if same month)
  */
 export async function reverseTransaction(transactionId: string): Promise<{
   success: boolean;
@@ -226,16 +229,18 @@ export async function reverseTransaction(transactionId: string): Promise<{
       .eq("id", tx.account_id);
   }
 
-  // 3. Revert budget if debit in current month
-  if (tx.type === "debit") {
-    const budget = await getOrCreateCurrentBudget();
-    const txMonth = (tx.created_at || "").slice(0, 7);
-    if (txMonth === budget.current_month && budget.id !== "fallback-budget") {
-      const newSpent = Math.max(0, budget.spent - Number(tx.amount));
-      await (supabase.from("budget") as any)
-        .update({ spent: newSpent, updated_at: new Date().toISOString() })
-        .eq("id", budget.id);
-    }
+  // 3. Revert budget if transaction is in current month
+  const budget = await getOrCreateCurrentBudget();
+  const txMonth = (tx.created_at || "").slice(0, 7);
+  if (txMonth === budget.current_month && budget.id !== "fallback-budget") {
+    const newSpent =
+      tx.type === "debit"
+        ? Math.max(0, budget.spent - Number(tx.amount))
+        : budget.spent + Number(tx.amount);
+
+    await (supabase.from("budget") as any)
+      .update({ spent: newSpent, updated_at: new Date().toISOString() })
+      .eq("id", budget.id);
   }
 
   // 4. Delete transaction row

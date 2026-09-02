@@ -861,7 +861,7 @@ export default function App() {
               Are you sure you want to delete this {txToDelete.type} of <strong>{formatINR(txToDelete.amount)}</strong> from <strong>{txToDelete.account_name}</strong>?
             </p>
             <div style={{ background: "rgba(244, 63, 94, 0.08)", border: "1px solid var(--danger-border)", padding: "12px 16px", borderRadius: "var(--radius-md)", fontSize: "0.8rem", color: "#fca5a5", marginBottom: "22px" }}>
-              🔄 <strong>Ledger Reversal:</strong> Deleting will automatically reverse its effect on your account balance {txToDelete.type === "debit" ? "and reduce your monthly spent budget" : ""}.
+              🔄 <strong>Ledger Reversal:</strong> Deleting will automatically reverse its effect on your account balance and {txToDelete.type === "debit" ? "reduce your monthly spent budget" : "increase your monthly spent budget"}.
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               <button type="button" className="btn btn-secondary" onClick={() => setTxToDelete(null)}>
