@@ -1,11 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "../lib/supabase.js";
 import { reverseTransaction } from "../lib/ledger.js";
+import { requireDashboardAuth } from "../lib/auth.js";
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
+  if (!requireDashboardAuth(req, res)) return;
+
   // ── GET: Fetch transactions with optional filters & pagination ────────────
   if (req.method === "GET") {
     try {

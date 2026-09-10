@@ -1,10 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getOrCreateCurrentBudget, updateMonthlyBudgetLimit } from "../lib/ledger.js";
+import { requireDashboardAuth } from "../lib/auth.js";
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
+  if (!requireDashboardAuth(req, res)) return;
+
   // ── GET: Return current month budget status ───────────────────────────────
   if (req.method === "GET") {
     try {

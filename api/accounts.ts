@@ -1,11 +1,14 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { supabase } from "../lib/supabase.js";
 import { getAllAccountsWithTotal, setPrimaryAccount } from "../lib/accounts.js";
+import { requireDashboardAuth } from "../lib/auth.js";
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ): Promise<void> {
+  if (!requireDashboardAuth(req, res)) return;
+
   // ── GET: Return all accounts with balances & primary flag ─────────────────
   if (req.method === "GET") {
     try {

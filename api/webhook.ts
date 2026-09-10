@@ -84,12 +84,16 @@ function verifySignature(req: VercelRequest): boolean {
   const signature = req.headers["x-hub-signature-256"] as string | undefined;
 
   if (!appSecret) {
-    console.warn("[webhook] WHATSAPP_APP_SECRET is not set — bypassing signature check");
+    if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
+      console.error("[webhook] WHATSAPP_APP_SECRET is not set in production — rejecting incoming request");
+      return false;
+    }
+    console.warn("[webhook] WHATSAPP_APP_SECRET is not set — bypassing signature check in local dev");
     return true;
   }
   if (!signature) {
-    console.warn("[webhook] No x-hub-signature-256 header received");
-    return true;
+    console.warn("[webhook] Missing x-hub-signature-256 header");
+    return false;
   }
 
   try {
@@ -99,14 +103,23 @@ function verifySignature(req: VercelRequest): boolean {
       .update(rawBody, "utf8")
       .digest("hex");
 
-    const matches = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    const sigBuffer = Buffer.from(signature);
+    const expBuffer = Buffer.from(expected);
+
+    if (sigBuffer.length !== expBuffer.length) {
+      console.warn("[webhook] Signature length mismatch");
+      return false;
+    }
+
+    const matches = crypto.timingSafeEqual(sigBuffer, expBuffer);
     if (!matches) {
-      console.warn("[webhook] Signature mismatch (proceeding for testing)");
+      console.warn("[webhook] Signature mismatch");
+      return false;
     }
     return true;
   } catch (err) {
-    console.warn("[webhook] Signature verification error:", err);
-    return true;
+    console.error("[webhook] Signature verification error:", err);
+    return false;
   }
 }
 
@@ -180,7 +193,10 @@ function handleGet(req: VercelRequest, res: VercelResponse): void {
 async function handlePost(req: VercelRequest, res: VercelResponse): Promise<void> {
   console.log("[webhook] Incoming POST payload:", JSON.stringify(req.body));
 
-  verifySignature(req);
+  if (!verifySignature(req)) {
+    res.status(403).json({ error: "Forbidden: Invalid signature" });
+    return;
+  }
 
   const payload = req.body as WebhookPayload;
   const value = payload?.entry?.[0]?.changes?.[0]?.value;
@@ -226,18 +242,30 @@ async function handlePost(req: VercelRequest, res: VercelResponse): Promise<void
   console.log(`[webhook] Processing message: "${messageText}" (buttonId: ${buttonId}) from ${fromNumber} (ID: ${whatsappMessageId})`);
 
   // ── Sender guard ───────────────────────────────────────────────────────────
-  const myNumber = process.env.MY_WHATSAPP_NUMBER || "917428849276";
+  // MY_WHATSAPP_NUMBER may be a comma-separated list of allowed numbers (E.164, no + prefix)
+  const allowedNumbers = (process.env.MY_WHATSAPP_NUMBER || "")
+    .split(",")
+    .map((n) => n.trim().replace(/\D/g, ""))
+    .filter(Boolean);
+
+  if (allowedNumbers.length === 0) {
+    console.error("[webhook] MY_WHATSAPP_NUMBER environment variable is not configured.");
+    res.status(500).json({ error: "Server misconfiguration: MY_WHATSAPP_NUMBER not set" });
+    return;
+  }
+
+  const fromClean = fromNumber.replace(/\D/g, "");
   const isTestSender = fromNumber === "16315551181" || fromNumber.includes("5551181");
-  const isOwner = fromNumber === myNumber || fromNumber.replace(/\D/g, "") === myNumber.replace(/\D/g, "");
+  const isOwner = allowedNumbers.some((n) => fromClean === n);
 
   if (!isOwner && !isTestSender) {
-    console.warn(`[webhook] Sender ${fromNumber} does not match MY_WHATSAPP_NUMBER (${myNumber}). Ignoring.`);
+    console.warn(`[webhook] Sender ${fromNumber} not in allowed list. Ignoring.`);
     res.status(200).json({ status: "ignored_unauthorized_sender" });
     return;
   }
 
-  // If it's a test trigger from Meta Developer Console, route reply to the user's real phone
-  const replyTarget = isTestSender ? myNumber : fromNumber;
+  // If it's a test trigger from Meta Developer Console, route reply to the first allowed number
+  const replyTarget = isTestSender ? (allowedNumbers[0] || fromNumber) : fromNumber;
 
   // ── Always log raw message to inbound_messages ─────────────────────────────
   try {

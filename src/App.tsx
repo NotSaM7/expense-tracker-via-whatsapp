@@ -59,12 +59,39 @@ export default function App() {
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
+  // Dashboard Access Key Auth
+  const [dashboardKey, setDashboardKey] = useState<string>(() => {
+    return localStorage.getItem("expense_dashboard_key") || "";
+  });
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
+  const [tempKeyInput, setTempKeyInput] = useState<string>("");
+
   // Toast / Error messages
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const showToast = (text: string, type: "success" | "error" = "success") => {
     setToastMessage({ text, type });
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // ── Authenticated Fetch Helper ─────────────────────────────────────────────
+  const authFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const key = localStorage.getItem("expense_dashboard_key") || dashboardKey;
+    const reqHeaders: Record<string, string> = {};
+    if (key) {
+      reqHeaders["x-dashboard-key"] = key;
+    }
+
+    const mergedHeaders = {
+      ...reqHeaders,
+      ...(init?.headers as Record<string, string> || {}),
+    };
+
+    const res = await fetch(input, { ...init, headers: mergedHeaders });
+    if (res.status === 401) {
+      setShowKeyModal(true);
+    }
+    return res;
   };
 
   // ── Data Fetching ──────────────────────────────────────────────────────────
@@ -74,10 +101,16 @@ export default function App() {
 
     try {
       const [accRes, budRes, txRes] = await Promise.all([
-        fetch("/api/accounts"),
-        fetch("/api/budget"),
-        fetch("/api/transactions?limit=200"),
+        authFetch("/api/accounts"),
+        authFetch("/api/budget"),
+        authFetch("/api/transactions?limit=200"),
       ]);
+
+      if (accRes.status === 401 || budRes.status === 401 || txRes.status === 401) {
+        showToast("Access key required or invalid", "error");
+        setShowKeyModal(true);
+        return;
+      }
 
       if (accRes.ok) {
         const accData = await accRes.json();
@@ -118,7 +151,7 @@ export default function App() {
     if (!newAccountName.trim()) return;
 
     try {
-      const res = await fetch("/api/accounts", {
+      const res = await authFetch("/api/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -148,7 +181,7 @@ export default function App() {
     if (!editingAccount) return;
 
     try {
-      const res = await fetch(`/api/accounts?id=${editingAccount.id}`, {
+      const res = await authFetch(`/api/accounts?id=${editingAccount.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -173,7 +206,7 @@ export default function App() {
 
   const handleSetPrimaryAccount = async (acc: Account) => {
     try {
-      const res = await fetch(`/api/accounts?id=${acc.id}`, {
+      const res = await authFetch(`/api/accounts?id=${acc.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_primary: true }),
@@ -196,7 +229,7 @@ export default function App() {
     if (!accountToDelete) return;
 
     try {
-      const res = await fetch(`/api/accounts?id=${accountToDelete.id}`, {
+      const res = await authFetch(`/api/accounts?id=${accountToDelete.id}`, {
         method: "DELETE",
       });
 
@@ -223,7 +256,7 @@ export default function App() {
     if (isNaN(limit) || limit <= 0) return;
 
     try {
-      const res = await fetch("/api/budget", {
+      const res = await authFetch("/api/budget", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ monthly_limit: limit }),
@@ -248,7 +281,7 @@ export default function App() {
     if (!txToDelete) return;
 
     try {
-      const res = await fetch(`/api/transactions?id=${txToDelete.id}`, {
+      const res = await authFetch(`/api/transactions?id=${txToDelete.id}`, {
         method: "DELETE",
       });
 
@@ -381,23 +414,36 @@ export default function App() {
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "3px" }}>
               <div className="pulse-dot"></div>
               <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-                Live Cloud Sync • +91 74288 49276
+                Live Cloud Sync • Connected
               </span>
             </div>
           </div>
         </div>
 
-        <button
-          className="btn btn-secondary"
-          onClick={() => fetchDashboardData(true)}
-          disabled={refreshing}
-          style={{ opacity: refreshing ? 0.6 : 1 }}
-        >
-          <span style={{ display: "inline-block", transform: refreshing ? "rotate(180deg)" : "none", transition: "transform 0.4s" }}>
-            🔄
-          </span>
-          {refreshing ? "Syncing..." : "Refresh"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setTempKeyInput(dashboardKey);
+              setShowKeyModal(true);
+            }}
+            title={dashboardKey ? "Dashboard key is configured" : "Configure dashboard key"}
+            style={{ padding: "8px 12px", fontSize: "0.85rem" }}
+          >
+            {dashboardKey ? "🔒 Key Set" : "🔓 Access Key"}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => fetchDashboardData(true)}
+            disabled={refreshing}
+            style={{ opacity: refreshing ? 0.6 : 1 }}
+          >
+            <span style={{ display: "inline-block", transform: refreshing ? "rotate(180deg)" : "none", transition: "transform 0.4s" }}>
+              🔄
+            </span>
+            {refreshing ? "Syncing..." : "Refresh"}
+          </button>
+        </div>
       </header>
 
       {/* Overview Cards Grid */}
@@ -893,6 +939,62 @@ export default function App() {
                 Confirm Delete
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dashboard Access Key Modal */}
+      {showKeyModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}>
+          <div className="glass-panel" style={{ width: "100%", maxWidth: "440px", padding: "30px" }}>
+            <h3 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "8px" }}>
+              🔑 Dashboard Access Key
+            </h3>
+            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "20px" }}>
+              Enter your secret key configured in <code style={{ color: "var(--primary)" }}>DASHBOARD_KEY</code> to view and manage accounts and transactions.
+            </p>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const clean = tempKeyInput.trim();
+                setDashboardKey(clean);
+                if (clean) {
+                  localStorage.setItem("expense_dashboard_key", clean);
+                  showToast("Dashboard key saved");
+                } else {
+                  localStorage.removeItem("expense_dashboard_key");
+                  showToast("Dashboard key cleared");
+                }
+                setShowKeyModal(false);
+                fetchDashboardData();
+              }}
+            >
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, marginBottom: "6px", color: "var(--text-secondary)" }}>
+                  Access Key / Password
+                </label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="Enter DASHBOARD_KEY value"
+                  value={tempKeyInput}
+                  onChange={(e) => setTempKeyInput(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowKeyModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Save & Unlock
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

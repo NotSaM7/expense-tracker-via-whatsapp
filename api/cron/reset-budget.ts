@@ -16,9 +16,12 @@ export default async function handler(
   const authHeader = req.headers.authorization;
   const querySecret = req.query.secret as string | undefined;
 
-  if (cronSecret) {
+  // Protect endpoint if CRON_SECRET is set, or reject in production if missing
+  if (cronSecret || process.env.NODE_ENV === "production" || process.env.VERCEL) {
     const isAuthorized =
-      authHeader === `Bearer ${cronSecret}` || querySecret === cronSecret;
+      Boolean(cronSecret) &&
+      (authHeader === `Bearer ${cronSecret}` || querySecret === cronSecret);
+
     if (!isAuthorized) {
       console.warn("[cron] Unauthorized reset-budget invocation attempt");
       res.status(401).json({ error: "Unauthorized" });
@@ -119,22 +122,30 @@ export default async function handler(
       .neq("id", "00000000-0000-0000-0000-000000000000");
 
     // ── 7. Send Proactive WhatsApp Summary Message ────────────────────────────
-    const myNumber = process.env.MY_WHATSAPP_NUMBER || "917428849276";
-    const spentFormatted = formatCurrency(spentAmount);
-    const limitFormatted = formatCurrency(monthlyLimit);
+    const myNumber = (process.env.MY_WHATSAPP_NUMBER || "")
+      .split(",")[0]
+      ?.trim()
+      .replace(/\D/g, "");
 
-    const bodyText = `📅 *${outgoingMonth} Summary*\nSpent: ${spentFormatted} / ${limitFormatted}\nTop categories: ${topCategoriesText}\n\nBudget reset for *${newMonthStr}* 🎉`;
+    if (!myNumber) {
+      console.warn("[cron] MY_WHATSAPP_NUMBER not configured. Skipping proactive monthly summary.");
+    } else {
+      const spentFormatted = formatCurrency(spentAmount);
+      const limitFormatted = formatCurrency(monthlyLimit);
 
-    const summaryButtons = [
-      { id: "summary_view_full", title: "View summary" },
-      { id: "summary_adjust_limit", title: "Adjust limit" },
-    ];
+      const bodyText = `📅 *${outgoingMonth} Summary*\nSpent: ${spentFormatted} / ${limitFormatted}\nTop categories: ${topCategoriesText}\n\nBudget reset for *${newMonthStr}* 🎉`;
 
-    try {
-      await sendWhatsAppButtons(myNumber, bodyText, summaryButtons);
-      console.log(`[cron] Sent proactive monthly summary to ${myNumber}`);
-    } catch (msgErr) {
-      console.error("[cron] Error sending WhatsApp summary message:", msgErr);
+      const summaryButtons = [
+        { id: "summary_view_full", title: "View summary" },
+        { id: "summary_adjust_limit", title: "Adjust limit" },
+      ];
+
+      try {
+        await sendWhatsAppButtons(myNumber, bodyText, summaryButtons);
+        console.log(`[cron] Sent proactive monthly summary to ${myNumber}`);
+      } catch (msgErr) {
+        console.error("[cron] Error sending WhatsApp summary message:", msgErr);
+      }
     }
 
     res.status(200).json({
