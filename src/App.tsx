@@ -59,12 +59,14 @@ export default function App() {
   const [txToDelete, setTxToDelete] = useState<Transaction | null>(null);
   const [accountToDelete, setAccountToDelete] = useState<Account | null>(null);
 
-  // Dashboard Access Key Auth
+  // ── Dashboard Access Key Auth (Session-based: locks every new session/incognito) ──
   const [dashboardKey, setDashboardKey] = useState<string>(() => {
-    return localStorage.getItem("expense_dashboard_key") || "";
+    return sessionStorage.getItem("expense_dashboard_key") || "";
   });
-  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
-  const [tempKeyInput, setTempKeyInput] = useState<string>("");
+  const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
+  const [unlockKeyInput, setUnlockKeyInput] = useState<string>("");
+  const [unlockError, setUnlockError] = useState<string>("");
+  const [isVerifyingKey, setIsVerifyingKey] = useState<boolean>(false);
 
   // Toast / Error messages
   const [toastMessage, setToastMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -76,7 +78,7 @@ export default function App() {
 
   // ── Authenticated Fetch Helper ─────────────────────────────────────────────
   const authFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const key = localStorage.getItem("expense_dashboard_key") || dashboardKey;
+    const key = sessionStorage.getItem("expense_dashboard_key") || dashboardKey;
     const reqHeaders: Record<string, string> = {};
     if (key) {
       reqHeaders["x-dashboard-key"] = key;
@@ -84,18 +86,88 @@ export default function App() {
 
     const mergedHeaders = {
       ...reqHeaders,
-      ...(init?.headers as Record<string, string> || {}),
+      ...((init?.headers as Record<string, string>) || {}),
     };
 
     const res = await fetch(input, { ...init, headers: mergedHeaders });
     if (res.status === 401) {
-      setShowKeyModal(true);
+      handleLockDashboard();
     }
     return res;
   };
 
-  // ── Data Fetching ──────────────────────────────────────────────────────────
+  const handleLockDashboard = () => {
+    sessionStorage.removeItem("expense_dashboard_key");
+    setDashboardKey("");
+    setIsUnlocked(false);
+    setAccounts([]);
+    setTransactions([]);
+    setTotalNetWorth(0);
+    setUnlockKeyInput("");
+  };
+
+  const attemptUnlock = async (keyToTry: string) => {
+    setIsVerifyingKey(true);
+    setUnlockError("");
+
+    try {
+      const res = await fetch("/api/accounts", {
+        headers: { "x-dashboard-key": keyToTry },
+      });
+
+      if (res.ok) {
+        sessionStorage.setItem("expense_dashboard_key", keyToTry);
+        setDashboardKey(keyToTry);
+        setIsUnlocked(true);
+        const accData = await res.json();
+        setAccounts(accData.accounts || []);
+        setTotalNetWorth(accData.total || 0);
+
+        // Fetch remaining budget & transactions
+        const [budRes, txRes] = await Promise.all([
+          fetch("/api/budget", { headers: { "x-dashboard-key": keyToTry } }),
+          fetch("/api/transactions?limit=200", { headers: { "x-dashboard-key": keyToTry } }),
+        ]);
+
+        if (budRes.ok) {
+          const budData = await budRes.json();
+          setBudget({
+            id: budData.id,
+            spent: Number(budData.spent) || 0,
+            monthly_limit: Number(budData.monthly_limit || budData.limit) || 10000,
+            current_month: budData.current_month || "",
+          });
+        }
+
+        if (txRes.ok) {
+          const txData = await txRes.json();
+          setTransactions(txData.transactions || []);
+        }
+
+        showToast("Dashboard unlocked");
+      } else if (res.status === 401) {
+        sessionStorage.removeItem("expense_dashboard_key");
+        setIsUnlocked(false);
+        setUnlockError("Incorrect access key. Access denied.");
+      } else {
+        setUnlockError("Failed to verify key with server");
+      }
+    } catch (err: any) {
+      setUnlockError(err.message || "Network error while connecting to server");
+    } finally {
+      setIsVerifyingKey(false);
+      setLoading(false);
+    }
+  };
+
+  // ── Data Fetching for Refresh / Background Updates ──────────────────────────
   const fetchDashboardData = async (isBackground = false) => {
+    const key = sessionStorage.getItem("expense_dashboard_key") || dashboardKey;
+    if (!key) {
+      handleLockDashboard();
+      return;
+    }
+
     if (!isBackground) setLoading(true);
     else setRefreshing(true);
 
@@ -107,8 +179,7 @@ export default function App() {
       ]);
 
       if (accRes.status === 401 || budRes.status === 401 || txRes.status === 401) {
-        showToast("Access key required or invalid", "error");
-        setShowKeyModal(true);
+        handleLockDashboard();
         return;
       }
 
@@ -142,7 +213,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    const savedKey = sessionStorage.getItem("expense_dashboard_key");
+    if (savedKey) {
+      attemptUnlock(savedKey);
+    } else {
+      setIsUnlocked(false);
+      setLoading(false);
+    }
   }, []);
 
   // ── Account Actions ────────────────────────────────────────────────────────
@@ -351,6 +428,123 @@ export default function App() {
     return "₹" + Math.round(num).toLocaleString("en-IN");
   };
 
+  // ── Lock Screen Gate: Render only lock screen if not unlocked ─────────────
+  if (!isUnlocked) {
+    return (
+      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+        {toastMessage && (
+          <div
+            style={{
+              position: "fixed",
+              top: "24px",
+              right: "24px",
+              zIndex: 9999,
+              padding: "14px 22px",
+              borderRadius: "var(--radius-md)",
+              background: toastMessage.type === "success" ? "#064e3b" : "#881337",
+              border: `1px solid ${toastMessage.type === "success" ? "var(--success)" : "var(--danger)"}`,
+              color: "#ffffff",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+              fontSize: "0.9rem",
+              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              animation: "slide-down 0.2s ease-out",
+            }}
+          >
+            <span>{toastMessage.type === "success" ? "✓" : "⚠️"}</span>
+            <span>{toastMessage.text}</span>
+          </div>
+        )}
+
+        <div className="glass-panel" style={{ width: "100%", maxWidth: "420px", padding: "40px 32px", textAlign: "center" }}>
+          <div
+            style={{
+              width: "64px",
+              height: "64px",
+              borderRadius: "20px",
+              background: "linear-gradient(135deg, #6366f1 0%, #3b82f6 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "2rem",
+              margin: "0 auto 22px",
+              boxShadow: "0 8px 24px rgba(99, 102, 241, 0.4)",
+            }}
+          >
+            🔐
+          </div>
+
+          <h1 style={{ fontSize: "1.6rem", fontWeight: 800, marginBottom: "8px", letterSpacing: "-0.02em" }}>
+            Expense Tracker
+          </h1>
+          <p style={{ fontSize: "0.88rem", color: "var(--text-secondary)", marginBottom: "26px", lineHeight: "1.5" }}>
+            This dashboard is private. Please enter your access key to view your balance and expenses.
+          </p>
+
+          {unlockError && (
+            <div
+              style={{
+                background: "rgba(244, 63, 94, 0.15)",
+                border: "1px solid var(--danger-border)",
+                borderRadius: "var(--radius-md)",
+                padding: "12px 16px",
+                color: "#fca5a5",
+                fontSize: "0.85rem",
+                fontWeight: 500,
+                marginBottom: "20px",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                textAlign: "left",
+              }}
+            >
+              <span>⚠️</span>
+              <span>{unlockError}</span>
+            </div>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!unlockKeyInput.trim()) return;
+              attemptUnlock(unlockKeyInput.trim());
+            }}
+          >
+            <div style={{ marginBottom: "22px", textAlign: "left" }}>
+              <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, marginBottom: "8px", color: "var(--text-secondary)" }}>
+                Dashboard Access Key
+              </label>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="Enter access key"
+                value={unlockKeyInput}
+                onChange={(e) => {
+                  setUnlockKeyInput(e.target.value);
+                  setUnlockError("");
+                }}
+                disabled={isVerifyingKey}
+                autoFocus
+                style={{ width: "100%", padding: "14px 16px", fontSize: "1rem" }}
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isVerifyingKey || !unlockKeyInput.trim()}
+              style={{ width: "100%", padding: "14px", fontSize: "1rem", fontWeight: 600, justifyContent: "center" }}
+            >
+              {isVerifyingKey ? "Verifying..." : "Unlock Dashboard"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: "1280px", margin: "0 auto", padding: "32px 20px 80px" }}>
       {/* Toast Notification */}
@@ -423,14 +617,11 @@ export default function App() {
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <button
             className="btn btn-secondary"
-            onClick={() => {
-              setTempKeyInput(dashboardKey);
-              setShowKeyModal(true);
-            }}
-            title={dashboardKey ? "Dashboard key is configured" : "Configure dashboard key"}
-            style={{ padding: "8px 12px", fontSize: "0.85rem" }}
+            onClick={handleLockDashboard}
+            title="Lock dashboard and hide data"
+            style={{ padding: "8px 14px", fontSize: "0.85rem" }}
           >
-            {dashboardKey ? "🔒 Key Set" : "🔓 Access Key"}
+            🔒 Lock
           </button>
           <button
             className="btn btn-secondary"
@@ -939,62 +1130,6 @@ export default function App() {
                 Confirm Delete
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Dashboard Access Key Modal */}
-      {showKeyModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}>
-          <div className="glass-panel" style={{ width: "100%", maxWidth: "440px", padding: "30px" }}>
-            <h3 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "8px" }}>
-              🔑 Dashboard Access Key
-            </h3>
-            <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: "20px" }}>
-              Enter your secret key configured in <code style={{ color: "var(--primary)" }}>DASHBOARD_KEY</code> to view and manage accounts and transactions.
-            </p>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const clean = tempKeyInput.trim();
-                setDashboardKey(clean);
-                if (clean) {
-                  localStorage.setItem("expense_dashboard_key", clean);
-                  showToast("Dashboard key saved");
-                } else {
-                  localStorage.removeItem("expense_dashboard_key");
-                  showToast("Dashboard key cleared");
-                }
-                setShowKeyModal(false);
-                fetchDashboardData();
-              }}
-            >
-              <div style={{ marginBottom: "20px" }}>
-                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, marginBottom: "6px", color: "var(--text-secondary)" }}>
-                  Access Key / Password
-                </label>
-                <input
-                  type="password"
-                  className="input-field"
-                  placeholder="Enter DASHBOARD_KEY value"
-                  value={tempKeyInput}
-                  onChange={(e) => setTempKeyInput(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowKeyModal(false)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save & Unlock
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

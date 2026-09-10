@@ -2,15 +2,18 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 /**
  * Validates whether the incoming request is authorized to access dashboard APIs.
- * If DASHBOARD_KEY is not configured, allows requests (for local dev convenience)
- * with a warning in production.
+ * Checks DASHBOARD_KEY, with fallback to WHATSAPP_VERIFY_TOKEN if DASHBOARD_KEY is unset.
+ * In production, requests are strictly rejected if no valid key is provided.
  */
 export function isDashboardAuthorized(req: VercelRequest): boolean {
-  const secret = process.env.DASHBOARD_KEY;
+  const secret = process.env.DASHBOARD_KEY || process.env.WHATSAPP_VERIFY_TOKEN;
+
   if (!secret) {
     if (process.env.NODE_ENV === "production" || process.env.VERCEL) {
-      console.warn("[auth] Warning: DASHBOARD_KEY is not set in environment variables. Dashboard API is unprotected.");
+      console.error("[auth] Error: No DASHBOARD_KEY or WHATSAPP_VERIFY_TOKEN set in production. Rejecting request.");
+      return false;
     }
+    // Allow unauthenticated access only in local development when no secret is configured
     return true;
   }
 
@@ -23,7 +26,7 @@ export function isDashboardAuthorized(req: VercelRequest): boolean {
     queryKey ||
     (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : authHeader);
 
-  return providedKey === secret;
+  return Boolean(providedKey && providedKey === secret);
 }
 
 export function requireDashboardAuth(
